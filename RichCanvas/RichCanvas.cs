@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -30,6 +30,16 @@ namespace RichCanvas
 
         private const string DrawingPanelName = "PART_Panel";
         private const string SelectionRectangleName = "PART_SelectionRectangle";
+        
+        // Security: Define safe bounds for numeric properties
+        private const float MinAutoTickRate = 0.1f;
+        private const float MaxAutoTickRate = 1000f;
+        private const float MinAutoSpeed = 0.1f;
+        private const float MaxAutoSpeed = 100f;
+        private const float MinGridSpacing = 1f;
+        private const float MaxGridSpacing = 1000f;
+        private const double MinScrollFactor = 1d;
+        private const double MaxScrollFactor = 100d;
 
         #endregion Constants
 
@@ -48,12 +58,36 @@ namespace RichCanvas
         /// <summary>
         /// Gets the current state telling the action that happens on <see cref="RichCanvas"/>.
         /// </summary>
-        public CanvasState CurrentState => _states.Peek();
+        public CanvasState CurrentState => _states?.Count > 0 ? _states.Peek() : null;
 
         /// <summary>
         /// Identifies the <see cref="MousePosition"/> dependency property.
         /// </summary>
-        public static DependencyProperty MousePositionProperty = DependencyProperty.Register(nameof(MousePosition), typeof(Point), typeof(RichCanvas), new FrameworkPropertyMetadata(default(Point)));
+        public static DependencyProperty MousePositionProperty = DependencyProperty.Register(
+            nameof(MousePosition), 
+            typeof(Point), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(default(Point), null, CoerceMousePosition));
+
+        // Security: Validate mouse position to prevent extreme values
+        private static object CoerceMousePosition(DependencyObject d, object value)
+        {
+            if (value is Point point)
+            {
+                // Prevent NaN and infinite values
+                if (double.IsNaN(point.X) || double.IsInfinity(point.X) ||
+                    double.IsNaN(point.Y) || double.IsInfinity(point.Y))
+                {
+                    return new Point(0, 0);
+                }
+                
+                // Clamp to reasonable bounds
+                double x = Math.Max(-100000, Math.Min(100000, point.X));
+                double y = Math.Max(-100000, Math.Min(100000, point.Y));
+                return new Point(x, y);
+            }
+            return new Point(0, 0);
+        }
 
         /// <summary>
         /// Gets or sets mouse position relative to <see cref="ItemsHost"/>.
@@ -67,7 +101,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="SelectionRectangle"/> dependency property key.
         /// </summary>
-        protected static readonly DependencyPropertyKey SelectionRectanglePropertyKey = DependencyProperty.RegisterReadOnly(nameof(SelectionRectangle), typeof(Rect), typeof(RichCanvas), new FrameworkPropertyMetadata(default(Rect)));
+        protected static readonly DependencyPropertyKey SelectionRectanglePropertyKey = DependencyProperty.RegisterReadOnly(
+            nameof(SelectionRectangle), 
+            typeof(Rect), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(default(Rect)));
 
         /// <summary>
         /// Identifies the read-only <see cref="SelectionRectangle"/> dependency property.
@@ -80,13 +118,28 @@ namespace RichCanvas
         public Rect SelectionRectangle
         {
             get => (Rect)GetValue(SelectionRectangleProperty);
-            internal set => SetValue(SelectionRectanglePropertyKey, value);
+            internal set 
+            {
+                // Security: Validate rectangle bounds
+                if (!double.IsNaN(value.Width) && !double.IsInfinity(value.Width) &&
+                    !double.IsNaN(value.Height) && !double.IsInfinity(value.Height) &&
+                    !double.IsNaN(value.X) && !double.IsInfinity(value.X) &&
+                    !double.IsNaN(value.Y) && !double.IsInfinity(value.Y) &&
+                    value.Width >= 0 && value.Height >= 0)
+                {
+                    SetValue(SelectionRectanglePropertyKey, value);
+                }
+            }
         }
 
         /// <summary>
         /// Identifies the <see cref="IsSelecting"/> dependency property key.
         /// </summary>
-        protected static readonly DependencyPropertyKey IsSelectingPropertyKey = DependencyProperty.RegisterReadOnly(nameof(IsSelecting), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false));
+        protected static readonly DependencyPropertyKey IsSelectingPropertyKey = DependencyProperty.RegisterReadOnly(
+            nameof(IsSelecting), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false));
 
         /// <summary>
         /// Identifies the read-only <see cref="IsSelecting"/> dependency property.
@@ -105,7 +158,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="AppliedTransform"/> dependency property key.
         /// </summary>
-        protected static readonly DependencyPropertyKey AppliedTransformPropertyKey = DependencyProperty.RegisterReadOnly(nameof(AppliedTransform), typeof(TransformGroup), typeof(RichCanvas), new FrameworkPropertyMetadata(default(TransformGroup)));
+        protected static readonly DependencyPropertyKey AppliedTransformPropertyKey = DependencyProperty.RegisterReadOnly(
+            nameof(AppliedTransform), 
+            typeof(TransformGroup), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(default(TransformGroup)));
 
         /// <summary>
         /// Identifies the read-only <see cref="AppliedTransform"/> dependency property.
@@ -124,7 +181,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="EnableAutoPanning"/> dependency property.
         /// </summary>
-        public static DependencyProperty EnableAutoPanningProperty = DependencyProperty.Register(nameof(EnableAutoPanning), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false, OnEnableAutoPanningChanged));
+        public static DependencyProperty EnableAutoPanningProperty = DependencyProperty.Register(
+            nameof(EnableAutoPanning), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false, OnEnableAutoPanningChanged));
 
         /// <summary>
         /// Gets or sets whether Auto-Panning is enabled.
@@ -139,7 +200,24 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="AutoPanTickRate"/> dependency property.
         /// </summary>
-        public static DependencyProperty AutoPanTickRateProperty = DependencyProperty.Register(nameof(AutoPanTickRate), typeof(float), typeof(RichCanvas), new FrameworkPropertyMetadata(1f, OnAutoPanTickRateChanged));
+        public static DependencyProperty AutoPanTickRateProperty = DependencyProperty.Register(
+            nameof(AutoPanTickRate), 
+            typeof(float), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(1f, OnAutoPanTickRateChanged, CoerceAutoPanTickRate));
+
+        // Security: Validate auto-pan tick rate to prevent DoS
+        private static object CoerceAutoPanTickRate(DependencyObject d, object value)
+        {
+            if (value is float floatValue)
+            {
+                if (float.IsNaN(floatValue) || float.IsInfinity(floatValue))
+                    return 1f;
+                    
+                return Math.Max(MinAutoTickRate, Math.Min(MaxAutoTickRate, floatValue));
+            }
+            return 1f;
+        }
 
         /// <summary>
         /// Gets or sets <see cref="DispatcherTimer"/> interval value.
@@ -154,7 +232,24 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="AutoPanSpeed"/> dependency property.
         /// </summary>
-        public static DependencyProperty AutoPanSpeedProperty = DependencyProperty.Register(nameof(AutoPanSpeed), typeof(float), typeof(RichCanvas), new FrameworkPropertyMetadata(1f));
+        public static DependencyProperty AutoPanSpeedProperty = DependencyProperty.Register(
+            nameof(AutoPanSpeed), 
+            typeof(float), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(1f, null, CoerceAutoPanSpeed));
+
+        // Security: Validate auto-pan speed to prevent extreme movements
+        private static object CoerceAutoPanSpeed(DependencyObject d, object value)
+        {
+            if (value is float floatValue)
+            {
+                if (float.IsNaN(floatValue) || float.IsInfinity(floatValue))
+                    return 1f;
+                    
+                return Math.Max(MinAutoSpeed, Math.Min(MaxAutoSpeed, floatValue));
+            }
+            return 1f;
+        }
 
         /// <summary>
         /// Gets or sets the <see cref="ItemsHost"/> translate speed.
@@ -169,11 +264,28 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="GridSpacing"/> dependency property.
         /// </summary>
-        public static DependencyProperty GridSpacingProperty = DependencyProperty.Register(nameof(GridSpacing), typeof(float), typeof(RichCanvas), new FrameworkPropertyMetadata(20f));
+        public static DependencyProperty GridSpacingProperty = DependencyProperty.Register(
+            nameof(GridSpacing), 
+            typeof(float), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(20f, null, CoerceGridSpacing));
+
+        // Security: Validate grid spacing to prevent extreme values
+        private static object CoerceGridSpacing(DependencyObject d, object value)
+        {
+            if (value is float floatValue)
+            {
+                if (float.IsNaN(floatValue) || float.IsInfinity(floatValue))
+                    return 20f;
+                    
+                return Math.Max(MinGridSpacing, Math.Min(MaxGridSpacing, floatValue));
+            }
+            return 20f;
+        }
 
         /// <summary>
         /// Gets or sets grid drawing viewport size.
-        /// Default is 10.
+        /// Default is 20.
         /// </summary>
         public float GridSpacing
         {
@@ -184,7 +296,30 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="ViewportLocation"/> dependency property.
         /// </summary>
-        public static DependencyProperty ViewportLocationProperty = DependencyProperty.Register(nameof(ViewportLocation), typeof(Point), typeof(RichCanvas), new FrameworkPropertyMetadata(default(Point), OnViewportLocationChanged));
+        public static DependencyProperty ViewportLocationProperty = DependencyProperty.Register(
+            nameof(ViewportLocation), 
+            typeof(Point), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(default(Point), OnViewportLocationChanged, CoerceViewportLocation));
+
+        // Security: Validate viewport location to prevent extreme coordinates
+        private static object CoerceViewportLocation(DependencyObject d, object value)
+        {
+            if (value is Point point)
+            {
+                if (double.IsNaN(point.X) || double.IsInfinity(point.X) ||
+                    double.IsNaN(point.Y) || double.IsInfinity(point.Y))
+                {
+                    return new Point(0, 0);
+                }
+                
+                // Clamp to reasonable viewport bounds
+                double x = Math.Max(-50000, Math.Min(50000, point.X));
+                double y = Math.Max(-50000, Math.Min(50000, point.Y));
+                return new Point(x, y);
+            }
+            return new Point(0, 0);
+        }
 
         /// <summary>
         /// Gets current viewport rectangle.
@@ -198,7 +333,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="EnableSnapping"/> dependency property.
         /// </summary>
-        public static DependencyProperty EnableSnappingProperty = DependencyProperty.Register(nameof(EnableSnapping), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false));
+        public static DependencyProperty EnableSnappingProperty = DependencyProperty.Register(
+            nameof(EnableSnapping), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false));
 
         /// <summary>
         /// Gets or sets whether grid snap correction on <see cref="RichCanvasContainer"/> is applied.
@@ -213,7 +352,21 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="SelectionRectangleStyle"/> dependency property.
         /// </summary>
-        public static DependencyProperty SelectionRectangleStyleProperty = DependencyProperty.Register(nameof(SelectionRectangleStyle), typeof(Style), typeof(RichCanvas));
+        public static DependencyProperty SelectionRectangleStyleProperty = DependencyProperty.Register(
+            nameof(SelectionRectangleStyle), 
+            typeof(Style), 
+            typeof(RichCanvas),
+            new FrameworkPropertyMetadata(null, OnSelectionRectangleStyleChanged));
+
+        // Security: Validate style to prevent malicious styles
+        private static void OnSelectionRectangleStyleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            if (e.NewValue != null && !(e.NewValue is Style style && style.TargetType == typeof(Rectangle)))
+            {
+                // Reset to null if invalid style
+                d.SetValue(SelectionRectangleStyleProperty, null);
+            }
+        }
 
         /// <summary>
         /// Gets or sets selection <see cref="Rectangle"/> style.
@@ -227,7 +380,24 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="ScrollFactor"/> dependency property.
         /// </summary>
-        public static DependencyProperty ScrollFactorProperty = DependencyProperty.Register(nameof(ScrollFactor), typeof(double), typeof(RichCanvas), new FrameworkPropertyMetadata(10d, null, CoerceScrollFactor));
+        public static DependencyProperty ScrollFactorProperty = DependencyProperty.Register(
+            nameof(ScrollFactor), 
+            typeof(double), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(10d, null, CoerceScrollFactor));
+
+        // Security: Enhanced scroll factor validation
+        private static object CoerceScrollFactor(DependencyObject d, object value)
+        {
+            if (value is double doubleValue)
+            {
+                if (double.IsNaN(doubleValue) || double.IsInfinity(doubleValue) || doubleValue <= 0)
+                    return 10d;
+                    
+                return Math.Max(MinScrollFactor, Math.Min(MaxScrollFactor, doubleValue));
+            }
+            return 10d;
+        }
 
         /// <summary>
         /// Gets or sets the scrolling factor applied when scrolling.
@@ -242,7 +412,29 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="SelectedItems"/> dependency property.
         /// </summary>
-        public static DependencyProperty SelectedItemsProperty = DependencyProperty.Register(nameof(SelectedItems), typeof(IList), typeof(RichCanvas), new FrameworkPropertyMetadata(default(IList), OnSelectedItemsSourceChanged));
+        public static DependencyProperty SelectedItemsProperty = DependencyProperty.Register(
+            nameof(SelectedItems), 
+            typeof(IList), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(default(IList), OnSelectedItemsSourceChanged, CoerceSelectedItems));
+
+        // Security: Validate selected items collection
+        private static object CoerceSelectedItems(DependencyObject d, object value)
+        {
+            // Prevent null collections which could cause NullReferenceException
+            if (value == null)
+            {
+                return new List<object>();
+            }
+            
+            // Ensure we have a valid collection type
+            if (!(value is IList))
+            {
+                return new List<object>();
+            }
+            
+            return value;
+        }
 
         /// <summary>
         /// Gets or sets the items in the <see cref="RichCanvas"/> that are selected.
@@ -256,10 +448,14 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="DrawingEnded"/> routed event.
         /// </summary>
-        public static readonly RoutedEvent DrawingEndedEvent = EventManager.RegisterRoutedEvent(nameof(DrawingEnded), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(RichCanvas));
+        public static readonly RoutedEvent DrawingEndedEvent = EventManager.RegisterRoutedEvent(
+            nameof(DrawingEnded), 
+            RoutingStrategy.Bubble, 
+            typeof(RoutedEventHandler), 
+            typeof(RichCanvas));
 
         /// <summary>
-        /// Occurs whenever <see cref="OnMouseUp(MouseButtonEventArgs)"/> is calld after drawing operation is finished.
+        /// Occurs whenever <see cref="OnMouseUp(MouseButtonEventArgs)"/> is called after drawing operation is finished.
         /// </summary>
         public event RoutedEventHandler DrawingEnded
         {
@@ -270,10 +466,13 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="DrawingEndedCommand"/> dependency property.
         /// </summary>
-        public static readonly DependencyProperty DrawingEndedCommandProperty = DependencyProperty.Register(nameof(DrawingEndedCommand), typeof(ICommand), typeof(RichCanvas));
+        public static readonly DependencyProperty DrawingEndedCommandProperty = DependencyProperty.Register(
+            nameof(DrawingEndedCommand), 
+            typeof(ICommand), 
+            typeof(RichCanvas));
 
         /// <summary>
-        /// Invoked when drawing opertation is completed. <br />
+        /// Invoked when drawing operation is completed. <br />
         /// Parameter is <see cref="Point"/>, representing the mouse position when drawing has finished.
         /// </summary>
         public ICommand DrawingEndedCommand
@@ -285,7 +484,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="DisableCache"/> dependency property.
         /// </summary>
-        public static DependencyProperty DisableCacheProperty = DependencyProperty.Register(nameof(DisableCache), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(true, OnDisableCacheChanged));
+        public static DependencyProperty DisableCacheProperty = DependencyProperty.Register(
+            nameof(DisableCache), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(true, OnDisableCacheChanged));
 
         /// <summary>
         /// Gets or sets whether caching is disabled.
@@ -300,7 +503,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="IsDragging"/> dependency property key.
         /// </summary>
-        protected static readonly DependencyPropertyKey IsDraggingPropertyKey = DependencyProperty.RegisterReadOnly(nameof(IsDragging), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false));
+        protected static readonly DependencyPropertyKey IsDraggingPropertyKey = DependencyProperty.RegisterReadOnly(
+            nameof(IsDragging), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false));
 
         /// <summary>
         /// Identifies the read-only <see cref="IsDragging"/> dependency property.
@@ -319,7 +526,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="RealTimeSelectionEnabled"/> dependency property.
         /// </summary>
-        public static DependencyProperty RealTimeSelectionEnabledProperty = DependencyProperty.Register(nameof(RealTimeSelectionEnabled), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false));
+        public static DependencyProperty RealTimeSelectionEnabledProperty = DependencyProperty.Register(
+            nameof(RealTimeSelectionEnabled), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false));
 
         /// <summary>
         /// Gets or sets whether real-time selection is enabled.
@@ -334,10 +545,14 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="RealTimeDraggingEnabled"/> dependency property.
         /// </summary>
-        public static DependencyProperty RealTimeDraggingEnabledProperty = DependencyProperty.Register(nameof(RealTimeDraggingEnabled), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(false));
+        public static DependencyProperty RealTimeDraggingEnabledProperty = DependencyProperty.Register(
+            nameof(RealTimeDraggingEnabled), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(false));
 
         /// <summary>
-        /// Gets or sets whether real-time selection is enabled.
+        /// Gets or sets whether real-time dragging is enabled.
         /// Default is <see langword="false"/>.
         /// </summary>
         public bool RealTimeDraggingEnabled
@@ -349,7 +564,11 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="CanSelectMultipleItems"/> dependency property.
         /// </summary>
-        public static DependencyProperty CanSelectMultipleItemsProperty = DependencyProperty.Register(nameof(CanSelectMultipleItems), typeof(bool), typeof(RichCanvas), new FrameworkPropertyMetadata(true, OnCanSelectMultipleItemsChanged));
+        public static DependencyProperty CanSelectMultipleItemsProperty = DependencyProperty.Register(
+            nameof(CanSelectMultipleItems), 
+            typeof(bool), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(true, OnCanSelectMultipleItemsChanged));
 
         /// <summary>
         /// Gets or sets whether you can select multiple elements or not.
@@ -364,7 +583,31 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="ViewportSize"/> dependency property.
         /// </summary>
-        public static readonly DependencyProperty ViewportSizeProperty = DependencyProperty.Register(nameof(ViewportSize), typeof(Size), typeof(RichCanvas), new FrameworkPropertyMetadata(Size.Empty));
+        public static readonly DependencyProperty ViewportSizeProperty = DependencyProperty.Register(
+            nameof(ViewportSize), 
+            typeof(Size), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(Size.Empty, null, CoerceViewportSize));
+
+        // Security: Validate viewport size
+        private static object CoerceViewportSize(DependencyObject d, object value)
+        {
+            if (value is Size size)
+            {
+                if (double.IsNaN(size.Width) || double.IsInfinity(size.Width) ||
+                    double.IsNaN(size.Height) || double.IsInfinity(size.Height) ||
+                    size.Width < 0 || size.Height < 0)
+                {
+                    return Size.Empty;
+                }
+                
+                // Clamp to reasonable maximum size
+                double width = Math.Min(100000, size.Width);
+                double height = Math.Min(100000, size.Height);
+                return new Size(width, height);
+            }
+            return Size.Empty;
+        }
 
         /// <summary>
         /// Gets the size of the viewport.
@@ -378,7 +621,29 @@ namespace RichCanvas
         /// <summary>
         /// Identifies the <see cref="ItemsExtent"/> dependency property.
         /// </summary>
-        public static readonly DependencyProperty ItemsExtentProperty = DependencyProperty.Register(nameof(ItemsExtent), typeof(Rect), typeof(RichCanvas), new FrameworkPropertyMetadata(Rect.Empty, OnItemsExtentChanged));
+        public static readonly DependencyProperty ItemsExtentProperty = DependencyProperty.Register(
+            nameof(ItemsExtent), 
+            typeof(Rect), 
+            typeof(RichCanvas), 
+            new FrameworkPropertyMetadata(Rect.Empty, OnItemsExtentChanged, CoerceItemsExtent));
+
+        // Security: Validate items extent
+        private static object CoerceItemsExtent(DependencyObject d, object value)
+        {
+            if (value is Rect rect)
+            {
+                if (double.IsNaN(rect.Width) || double.IsInfinity(rect.Width) ||
+                    double.IsNaN(rect.Height) || double.IsInfinity(rect.Height) ||
+                    double.IsNaN(rect.X) || double.IsInfinity(rect.X) ||
+                    double.IsNaN(rect.Y) || double.IsInfinity(rect.Y) ||
+                    rect.Width < 0 || rect.Height < 0)
+                {
+                    return Rect.Empty;
+                }
+                return rect;
+            }
+            return Rect.Empty;
+        }
 
         /// <summary>
         /// The area covered by the <see cref="RichCanvasContainer"/>s present on <see cref="RichCanvas"/>.
@@ -396,7 +661,7 @@ namespace RichCanvas
         internal RichCanvasPanel ItemsHost => _mainPanel;
         internal bool IsZooming { get; set; }
         internal IList BaseSelectedItems => base.SelectedItems;
-        internal List<int> CurrentDrawingIndexes { get; } = [];
+        internal List<int> CurrentDrawingIndexes { get; } = new List<int>();
 
         #endregion Internal Properties
 
@@ -423,6 +688,12 @@ namespace RichCanvas
 
             _states = new Stack<CanvasState>();
             _states.Push(GetDefaultState());
+            
+            // Security: Initialize SelectedItems with a valid collection if null
+            if (SelectedItems == null)
+            {
+                SelectedItems = new List<object>();
+            }
         }
 
         #endregion Constructors
@@ -441,8 +712,11 @@ namespace RichCanvas
         public override void OnApplyTemplate()
         {
             _mainPanel = (RichCanvasPanel)GetTemplateChild(DrawingPanelName);
-            _mainPanel.ItemsOwner = this;
-            SetCachingMode(DisableCache);
+            if (_mainPanel != null)
+            {
+                _mainPanel.ItemsOwner = this;
+                SetCachingMode(DisableCache);
+            }
         }
 
         /// <inheritdoc/>
@@ -457,19 +731,25 @@ namespace RichCanvas
         {
             RenderTransform = new TransformGroup
             {
-                Children = new TransformCollection([new ScaleTransform(), new TranslateTransform()])
+                Children = new TransformCollection(new Transform[] { new ScaleTransform(), new TranslateTransform() })
             }
         };
 
         /// <inheritdoc/>
         protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             if ((Mouse.Captured == null || IsMouseCaptured) && e.HasAnyButtonPressed())
             {
-                if (CurrentState.MatchesPreviewMouseDownState(e, out CanvasState? matchingState))
+                if (CurrentState != null && CurrentState.MatchesPreviewMouseDownState(e, out CanvasState matchingState))
                 {
                     CaptureMouse();
-                    PushState(matchingState!);
+                    if (matchingState != null)
+                    {
+                        PushState(matchingState);
+                    }
                 }
             }
         }
@@ -477,29 +757,38 @@ namespace RichCanvas
         /// <inheritdoc/>
         protected override void OnMouseDown(MouseButtonEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             if ((Mouse.Captured == null || IsMouseCaptured) && e.HasAnyButtonPressed())
             {
                 CaptureMouse();
-                CurrentState.HandleMouseDown(e);
+                CurrentState?.HandleMouseDown(e);
             }
         }
 
         /// <inheritdoc/>
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null || _mainPanel == null) return;
+            
             MousePosition = e.GetPosition(_mainPanel);
             if (IsMouseCaptured)
             {
-                CurrentState.HandleMouseMove(e);
+                CurrentState?.HandleMouseMove(e);
             }
         }
 
         /// <inheritdoc/>
         protected override void OnMouseUp(MouseButtonEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             if (IsMouseCaptured)
             {
-                CurrentState.HandleMouseUp(e);
+                CurrentState?.HandleMouseUp(e);
                 PopState();
                 if (e.HasAllButtonsReleased())
                 {
@@ -512,26 +801,35 @@ namespace RichCanvas
         /// <inheritdoc/>
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            CurrentState.HandleKeyDown(e);
+            // Security: Validate event args
+            if (e == null) return;
+            
+            CurrentState?.HandleKeyDown(e);
         }
 
         /// <inheritdoc/>
         protected override void OnKeyUp(KeyEventArgs e)
         {
-            CurrentState.HandleKeyUp(e);
+            // Security: Validate event args
+            if (e == null) return;
+            
+            CurrentState?.HandleKeyUp(e);
             PopState();
         }
 
         /// <inheritdoc/>
         protected override void OnItemsChanged(NotifyCollectionChangedEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             if (e.Action == NotifyCollectionChangedAction.Reset)
             {
                 CurrentDrawingIndexes.Clear();
                 if (CanSelectMultipleItems)
                 {
-                    base.SelectedItems.Clear();
-                    SelectedItems.Clear();
+                    base.SelectedItems?.Clear();
+                    SelectedItems?.Clear();
                 }
                 else
                 {
@@ -540,11 +838,15 @@ namespace RichCanvas
             }
             else if (e.NewStartingIndex != -1 && e.Action == NotifyCollectionChangedAction.Add)
             {
-                // a container is not able to be drawn if it has Width or Height already
-                var container = (RichCanvasContainer)ItemContainerGenerator.ContainerFromIndex(e.NewStartingIndex);
-                if (!container.IsValid())
+                // Security: Validate index bounds
+                if (e.NewStartingIndex >= 0 && e.NewStartingIndex < Items.Count)
                 {
-                    CurrentDrawingIndexes.Add(e.NewStartingIndex);
+                    // a container is not able to be drawn if it has Width or Height already
+                    var container = ItemContainerGenerator.ContainerFromIndex(e.NewStartingIndex) as RichCanvasContainer;
+                    if (container != null && !container.IsValid())
+                    {
+                        CurrentDrawingIndexes.Add(e.NewStartingIndex);
+                    }
                 }
             }
             else if (e.Action == NotifyCollectionChangedAction.Remove)
@@ -557,9 +859,14 @@ namespace RichCanvas
             }
             else if (e.Action == NotifyCollectionChangedAction.Move)
             {
-                int oldValue = CurrentDrawingIndexes[e.OldStartingIndex];
-                CurrentDrawingIndexes.Remove(oldValue);
-                CurrentDrawingIndexes.Insert(e.NewStartingIndex, oldValue);
+                // Security: Validate index bounds
+                if (e.OldStartingIndex >= 0 && e.OldStartingIndex < CurrentDrawingIndexes.Count &&
+                    e.NewStartingIndex >= 0)
+                {
+                    int oldValue = CurrentDrawingIndexes[e.OldStartingIndex];
+                    CurrentDrawingIndexes.Remove(oldValue);
+                    CurrentDrawingIndexes.Insert(Math.Min(e.NewStartingIndex, CurrentDrawingIndexes.Count), oldValue);
+                }
             }
             // Replace event not implemented because the index doesn't change
         }
@@ -569,8 +876,13 @@ namespace RichCanvas
         {
             base.OnRenderSizeChanged(sizeInfo);
 
-            ViewportSize = new Size(ActualWidth / ViewportZoom, ActualHeight / ViewportZoom);
-            UpdateScrollbars();
+            // Security: Validate viewport zoom to prevent division by zero
+            double zoom = ViewportZoom;
+            if (zoom > 0 && !double.IsNaN(zoom) && !double.IsInfinity(zoom))
+            {
+                ViewportSize = new Size(ActualWidth / zoom, ActualHeight / zoom);
+                UpdateScrollbars();
+            }
         }
 
         #endregion Override Methods
@@ -586,6 +898,9 @@ namespace RichCanvas
         /// <param name="state">The new state.</param>
         public void PushState(CanvasState state)
         {
+            // Security: Validate state
+            if (state == null) return;
+            
             _states.Push(state);
             state.Enter();
         }
@@ -594,11 +909,11 @@ namespace RichCanvas
         public void PopState()
         {
             // Never remove the default state
-            if (_states.Count > 1)
+            if (_states != null && _states.Count > 1)
             {
                 CanvasState prev = _states.Pop();
-                prev.Exit();
-                CurrentState.ReEnter();
+                prev?.Exit();
+                CurrentState?.ReEnter();
             }
         }
 
@@ -606,22 +921,34 @@ namespace RichCanvas
 
         #region Properties Callbacks
 
-        private static void OnDisableCacheChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((RichCanvas)d).SetCachingMode((bool)e.NewValue);
+        private static void OnDisableCacheChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) 
+        {
+            var canvas = d as RichCanvas;
+            canvas?.SetCachingMode((bool)e.NewValue);
+        }
 
         private static void OnEnableAutoPanningChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-            => ((RichCanvas)d).OnEnableAutoPanningChanged((bool)e.NewValue);
+        {
+            var canvas = d as RichCanvas;
+            canvas?.OnEnableAutoPanningChanged((bool)e.NewValue);
+        }
 
-        private static void OnAutoPanTickRateChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((RichCanvas)d).UpdateTimerInterval();
+        private static void OnAutoPanTickRateChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) 
+        {
+            var canvas = d as RichCanvas;
+            canvas?.UpdateTimerInterval();
+        }
 
-        private static object CoerceScrollFactor(DependencyObject d, object value)
-            => (double)value == 0 ? 10d : value;
-
-        private static void OnCanSelectMultipleItemsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((RichCanvas)d).CanSelectMultipleItemsUpdated((bool)e.NewValue);
+        private static void OnCanSelectMultipleItemsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) 
+        {
+            var canvas = d as RichCanvas;
+            canvas?.CanSelectMultipleItemsUpdated((bool)e.NewValue);
+        }
 
         private static void OnItemsExtentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
-            var editor = (RichCanvas)d;
-            editor.UpdateScrollbars();
+            var editor = d as RichCanvas;
+            editor?.UpdateScrollbars();
         }
 
         #endregion Properties Callbacks
@@ -631,41 +958,52 @@ namespace RichCanvas
         /// <inheritdoc/>
         protected override void OnSelectionChanged(SelectionChangedEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             base.OnSelectionChanged(e);
             if (CanSelectMultipleItems)
             {
-                IList? selected = SelectedItems;
+                IList selected = SelectedItems;
                 if (selected != null)
                 {
                     IList added = e.AddedItems;
-                    for (int i = 0; i < added.Count; i++)
+                    if (added != null)
                     {
-                        // Ensure no duplicates are added
-                        if (!selected.Contains(added[i]))
+                        for (int i = 0; i < added.Count; i++)
                         {
-                            selected.Add(added[i]);
+                            // Ensure no duplicates are added
+                            if (!selected.Contains(added[i]))
+                            {
+                                selected.Add(added[i]);
+                            }
                         }
                     }
 
                     IList removed = e.RemovedItems;
-                    for (int i = 0; i < removed.Count; i++)
+                    if (removed != null)
                     {
-                        selected.Remove(removed[i]);
+                        for (int i = 0; i < removed.Count; i++)
+                        {
+                            selected.Remove(removed[i]);
+                        }
                     }
                 }
             }
             else
             {
-                if (e.AddedItems.Count == 1)
+                if (e.AddedItems != null && e.AddedItems.Count == 1)
                 {
                     SelectedItem = e.AddedItems[0];
-                    SelectedItems.Add(e.AddedItems[0]);
+                    SelectedItems?.Add(e.AddedItems[0]);
                 }
-                else if (e.AddedItems.Count > 1)
+                else if (e.AddedItems != null && e.AddedItems.Count > 1)
                 {
                     throw new ArgumentOutOfRangeException($"Cannot select more than 1 item when {nameof(CanSelectMultipleItems)} is set to false.");
                 }
-                if (e.RemovedItems.Count == 1 && SelectedItems.Count > 0 && e.RemovedItems[0] == SelectedItems[0])
+                if (e.RemovedItems != null && e.RemovedItems.Count == 1 && 
+                    SelectedItems != null && SelectedItems.Count > 0 && 
+                    e.RemovedItems[0] == SelectedItems[0])
                 {
                     SelectedItems.Remove(e.RemovedItems[0]);
                 }
@@ -684,15 +1022,31 @@ namespace RichCanvas
         public List<object> GetElementsInArea(Rect area)
         {
             var intersectedElements = new List<object>();
+            
+            // Security: Validate area bounds
+            if (double.IsNaN(area.Width) || double.IsInfinity(area.Width) ||
+                double.IsNaN(area.Height) || double.IsInfinity(area.Height) ||
+                double.IsNaN(area.X) || double.IsInfinity(area.X) ||
+                double.IsNaN(area.Y) || double.IsInfinity(area.Y) ||
+                area.Width < 0 || area.Height < 0 ||
+                _mainPanel == null)
+            {
+                return intersectedElements;
+            }
+            
             var rectangleGeometry = new RectangleGeometry(area);
             VisualTreeHelper.HitTest(_mainPanel, null,
                 new HitTestResultCallback((HitTestResult result) =>
                 {
-                    var geometryHitTestResult = (GeometryHitTestResult)result;
-                    if (geometryHitTestResult.IntersectionDetail != IntersectionDetail.Empty)
+                    var geometryHitTestResult = result as GeometryHitTestResult;
+                    if (geometryHitTestResult != null && 
+                        geometryHitTestResult.IntersectionDetail != IntersectionDetail.Empty)
                     {
                         RichCanvasContainer container = VisualHelper.GetParentContainer(geometryHitTestResult.VisualHit);
-                        intersectedElements.Add(container.DataContext);
+                        if (container != null && container.DataContext != null)
+                        {
+                            intersectedElements.Add(container.DataContext);
+                        }
                     }
                     return HitTestResultBehavior.Continue;
                 }),
@@ -701,7 +1055,10 @@ namespace RichCanvas
         }
 
         private static void OnSelectedItemsSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-            => ((RichCanvas)d).OnSelectedItemsSourceChanged((IList)e.OldValue, (IList)e.NewValue);
+        {
+            var canvas = d as RichCanvas;
+            canvas?.OnSelectedItemsSourceChanged(e.OldValue as IList, e.NewValue as IList);
+        }
 
         private void OnSelectedItemsSourceChanged(IList oldValue, IList newValue)
         {
@@ -718,41 +1075,49 @@ namespace RichCanvas
             if (CanSelectMultipleItems)
             {
                 IList selectedItems = base.SelectedItems;
-
-                BeginUpdateSelectedItems();
-                selectedItems.Clear();
-                if (newValue != null)
+                if (selectedItems != null)
                 {
-                    for (int i = 0; i < newValue.Count; i++)
+                    BeginUpdateSelectedItems();
+                    selectedItems.Clear();
+                    if (newValue != null)
                     {
-                        selectedItems.Add(newValue[i]);
+                        for (int i = 0; i < newValue.Count; i++)
+                        {
+                            selectedItems.Add(newValue[i]);
+                        }
                     }
+                    EndUpdateSelectedItems();
                 }
-                EndUpdateSelectedItems();
             }
         }
 
-        private void OnSelectedItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        private void OnSelectedItemsChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
+            // Security: Validate event args
+            if (e == null) return;
+            
             switch (e.Action)
             {
                 case NotifyCollectionChangedAction.Reset:
                     if (CanSelectMultipleItems)
                     {
-                        base.SelectedItems.Clear();
+                        base.SelectedItems?.Clear();
                     }
                     break;
 
                 case NotifyCollectionChangedAction.Add:
                     if (CanSelectMultipleItems)
                     {
-                        IList? newItems = e.NewItems;
+                        IList newItems = e.NewItems;
                         if (newItems != null)
                         {
                             IList selectedItems = base.SelectedItems;
-                            for (int i = 0; i < newItems.Count; i++)
+                            if (selectedItems != null)
                             {
-                                selectedItems.Add(newItems[i]);
+                                for (int i = 0; i < newItems.Count; i++)
+                                {
+                                    selectedItems.Add(newItems[i]);
+                                }
                             }
                         }
                     }
@@ -761,13 +1126,16 @@ namespace RichCanvas
                 case NotifyCollectionChangedAction.Remove:
                     if (CanSelectMultipleItems)
                     {
-                        IList? oldItems = e.OldItems;
+                        IList oldItems = e.OldItems;
                         if (oldItems != null)
                         {
                             IList selectedItems = base.SelectedItems;
-                            for (int i = 0; i < oldItems.Count; i++)
+                            if (selectedItems != null)
                             {
-                                selectedItems.Remove(oldItems[i]);
+                                for (int i = 0; i < oldItems.Count; i++)
+                                {
+                                    selectedItems.Remove(oldItems[i]);
+                                }
                             }
                         }
                     }
@@ -777,6 +1145,8 @@ namespace RichCanvas
 
         internal void UpdateSingleSelectedItem(RichCanvasContainer selectedContainer)
         {
+            if (selectedContainer == null) return;
+            
             if (SelectedItem == null)
             {
                 selectedContainer.IsSelected = true;
@@ -811,20 +1181,26 @@ namespace RichCanvas
                 }
                 else if (SelectedItems?.Count == 1)
                 {
-                    SelectedItem = SelectedItems?[0];
+                    SelectedItem = SelectedItems[0];
                 }
             }
         }
 
         private static void OnViewportLocationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
-            var host = (RichCanvas)d;
+            var host = d as RichCanvas;
+            if (host == null) return;
+            
             var translate = (Point)e.NewValue;
-
-            host.TranslateTransform.X = -translate.X * host.ViewportZoom;
-            host.TranslateTransform.Y = -translate.Y * host.ViewportZoom;
-
-            host.UpdateScrollbars();
+            
+            // Security: Validate viewport zoom to prevent extreme transforms
+            double zoom = host.ViewportZoom;
+            if (zoom > 0 && !double.IsNaN(zoom) && !double.IsInfinity(zoom))
+            {
+                host.TranslateTransform.X = -translate.X * zoom;
+                host.TranslateTransform.Y = -translate.Y * zoom;
+                host.UpdateScrollbars();
+            }
         }
 
         private void SetCachingMode(bool disable)
@@ -833,12 +1209,17 @@ namespace RichCanvas
             {
                 if (!disable)
                 {
-                    _mainPanel.CacheMode = new BitmapCache()
+                    // Security: Validate viewport zoom for cache scale
+                    double zoom = ViewportZoom;
+                    if (zoom > 0 && !double.IsNaN(zoom) && !double.IsInfinity(zoom))
                     {
-                        EnableClearType = false,
-                        SnapsToDevicePixels = false,
-                        RenderAtScale = ViewportZoom
-                    };
+                        _mainPanel.CacheMode = new BitmapCache()
+                        {
+                            EnableClearType = false,
+                            SnapsToDevicePixels = false,
+                            RenderAtScale = zoom
+                        };
+                    }
                 }
                 else
                 {
@@ -851,15 +1232,24 @@ namespace RichCanvas
         {
             if (enableAutoPanning)
             {
-                if (_autoPanTimer == null)
+                // Security: Validate tick rate before creating timer
+                float tickRate = AutoPanTickRate;
+                if (tickRate > 0 && !float.IsNaN(tickRate) && !float.IsInfinity(tickRate))
                 {
-                    _autoPanTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(AutoPanTickRate), DispatcherPriority.Background, new EventHandler(HandleAutoPanning), Dispatcher);
-                    _autoPanTimer.Start();
-                }
-                else
-                {
-                    _autoPanTimer.Interval = TimeSpan.FromMilliseconds(AutoPanTickRate);
-                    _autoPanTimer.Start();
+                    if (_autoPanTimer == null)
+                    {
+                        _autoPanTimer = new DispatcherTimer(
+                            TimeSpan.FromMilliseconds(tickRate), 
+                            DispatcherPriority.Background, 
+                            new EventHandler(HandleAutoPanning), 
+                            Dispatcher);
+                        _autoPanTimer.Start();
+                    }
+                    else
+                    {
+                        _autoPanTimer.Interval = TimeSpan.FromMilliseconds(tickRate);
+                        _autoPanTimer.Start();
+                    }
                 }
             }
             else
@@ -868,49 +1258,63 @@ namespace RichCanvas
             }
         }
 
-        private void HandleAutoPanning(object? sender, EventArgs e)
+        private void HandleAutoPanning(object sender, EventArgs e)
         {
-            if (IsMouseOver && Mouse.LeftButton == MouseButtonState.Pressed && Mouse.Captured != null && !IsMouseCapturedByScrollBar() && !IsPanning)
+            if (IsMouseOver && Mouse.LeftButton == MouseButtonState.Pressed && 
+                Mouse.Captured != null && !IsMouseCapturedByScrollBar() && !IsPanning)
             {
                 Point mousePosition = Mouse.GetPosition(this);
                 double x = ViewportLocation.X;
                 double y = ViewportLocation.Y;
 
+                // Security: Use validated auto-pan speed
+                float speed = AutoPanSpeed;
+
                 if (mousePosition.Y <= 0)
                 {
-                    y -= AutoPanSpeed;
+                    y -= speed;
                 }
                 else if (mousePosition.Y >= ViewportHeight)
                 {
-                    y += AutoPanSpeed;
+                    y += speed;
                 }
 
                 if (mousePosition.X <= 0)
                 {
-                    x -= AutoPanSpeed;
+                    x -= speed;
                 }
                 else if (mousePosition.X >= ViewportWidth)
                 {
-                    x += AutoPanSpeed;
+                    x += speed;
                 }
 
                 ViewportLocation = new Point(x, y);
-                MousePosition = Mouse.GetPosition(ItemsHost);
+                if (_mainPanel != null)
+                {
+                    MousePosition = Mouse.GetPosition(_mainPanel);
+                }
 
-                CurrentState.HandleAutoPanning(new MouseEventArgs(Mouse.PrimaryDevice, 0));
+                CurrentState?.HandleAutoPanning(new MouseEventArgs(Mouse.PrimaryDevice, 0));
             }
         }
 
         private static bool IsMouseCapturedByScrollBar()
         {
-            return Mouse.Captured.GetType() == typeof(Thumb) || Mouse.Captured.GetType() == typeof(RepeatButton);
+            var captured = Mouse.Captured;
+            return captured != null && 
+                   (captured.GetType() == typeof(Thumb) || captured.GetType() == typeof(RepeatButton));
         }
 
         private void UpdateTimerInterval()
         {
             if (_autoPanTimer != null)
             {
-                _autoPanTimer.Interval = TimeSpan.FromMilliseconds(AutoPanTickRate);
+                // Security: Validate tick rate
+                float tickRate = AutoPanTickRate;
+                if (tickRate > 0 && !float.IsNaN(tickRate) && !float.IsInfinity(tickRate))
+                {
+                    _autoPanTimer.Interval = TimeSpan.FromMilliseconds(tickRate);
+                }
             }
         }
 
